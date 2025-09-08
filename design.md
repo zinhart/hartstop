@@ -9,7 +9,7 @@ also a task to periodically dump the database
 
 authentication 
 	=> @node-oauth/oauth2-server
-        => @node-oauth/oauth2-server   
+  => https://github.com/panva/node-oidc-provider   
 =====================================================================
 Tables
 - Agent
