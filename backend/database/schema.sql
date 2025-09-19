@@ -2,6 +2,7 @@
 -- Hartstop C5 Platform DB
 -- Single-file install: core schema, partitioning (pg_partman),
 -- hot→warm→cold rotation, replay-ready archives, and operational helpers.
+-- (Updated: global & per-engagement roles; load_balancers.created_at)
 -- =====================================================================
 
 -- =========================== Extensions ==============================
@@ -25,6 +26,7 @@ BEGIN
     CREATE TYPE account_status_enum AS ENUM ('enabled', 'disabled');
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'role_enum') THEN
+    -- Ordering matters for GREATEST(): Analyst < Operator < Admin
     CREATE TYPE role_enum AS ENUM ('Analyst', 'Operator', 'Admin');
   END IF;
 END$$;
@@ -35,6 +37,8 @@ CREATE TABLE IF NOT EXISTS users (
   username        TEXT NOT NULL UNIQUE,
   password_hash   TEXT NOT NULL,
   account_status  account_status_enum NOT NULL DEFAULT 'enabled',
+  -- Global role (default Analyst). Effective role per engagement is max(global_role, engagement_users.role).
+  global_role     role_enum NOT NULL DEFAULT 'Analyst',
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -47,20 +51,22 @@ CREATE TABLE IF NOT EXISTS engagements (
   CHECK (end_ts IS NULL OR end_ts > start_ts)
 );
 
+-- Membership with per-engagement role
 CREATE TABLE IF NOT EXISTS engagement_users (
   engagement_uuid UUID NOT NULL REFERENCES engagements(engagement_uuid) ON DELETE CASCADE,
   user_uuid       UUID NOT NULL REFERENCES users(user_uuid) ON DELETE CASCADE,
+  role            role_enum NOT NULL DEFAULT 'Analyst',
   PRIMARY KEY (engagement_uuid, user_uuid)
 );
 
--- Optional per-engagement or global roles
-CREATE TABLE IF NOT EXISTS user_roles (
-  user_uuid       UUID NOT NULL REFERENCES users(user_uuid) ON DELETE CASCADE,
-  role            role_enum NOT NULL,
-  engagement_uuid UUID REFERENCES engagements(engagement_uuid) ON DELETE CASCADE,
-  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-  PRIMARY KEY (user_uuid, role, engagement_uuid)
-);
+-- Effective role view (max of global_role and engagement role)
+CREATE OR REPLACE VIEW vw_user_engagement_roles AS
+SELECT
+  eu.user_uuid,
+  eu.engagement_uuid,
+  GREATEST(u.global_role, eu.role)::role_enum AS effective_role
+FROM engagement_users eu
+JOIN users u USING (user_uuid);
 
 CREATE TABLE IF NOT EXISTS last_login (
   user_uuid  UUID PRIMARY KEY REFERENCES users(user_uuid) ON DELETE CASCADE,
@@ -90,6 +96,7 @@ CREATE TABLE IF NOT EXISTS load_balancers (
   second_hop          TEXT,
   third_hop           TEXT,
   last_hop            TEXT,
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT lb_nonempty CHECK (
     COALESCE(first_hop,'') <> '' OR COALESCE(second_hop,'') <> '' OR
     COALESCE(third_hop,'') <> '' OR COALESCE(last_hop,'') <> ''
@@ -225,7 +232,7 @@ CREATE TABLE IF NOT EXISTS dirwalks_archive (
   payload         JSONB NOT NULL
 ) PARTITION BY RANGE (created_at);
 
--- ================= API Idempotency ===========
+-- ================= API Idempotency =================
 CREATE TABLE IF NOT EXISTS api_idempotency (
   key TEXT PRIMARY KEY,
   status SMALLINT NOT NULL, -- 1=processing, 2=done
@@ -234,8 +241,6 @@ CREATE TABLE IF NOT EXISTS api_idempotency (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS api_idempotency_created_idx ON api_idempotency (created_at);
-
-
 
 -- ========================== pg_partman setup =========================
 -- Hot parents: daily interval, premake 7 days; RETENTION: detach only (keep_table=true)
@@ -338,16 +343,16 @@ SELECT * FROM dirwalks_archive;
 
 -- ============================= Indexes ===============================
 -- Users
-CREATE INDEX IF NOT EXISTS users_status_idx   ON users (account_status);
-CREATE INDEX IF NOT EXISTS users_created_idx  ON users (created_at DESC);
+CREATE INDEX IF NOT EXISTS users_status_idx    ON users (account_status);
+CREATE INDEX IF NOT EXISTS users_created_idx   ON users (created_at DESC);
 
 -- Engagement relations
 CREATE INDEX IF NOT EXISTS engagement_users_user_idx ON engagement_users (user_uuid);
-CREATE INDEX IF NOT EXISTS user_roles_user_idx       ON user_roles (user_uuid, engagement_uuid);
+CREATE INDEX IF NOT EXISTS engagement_users_role_idx ON engagement_users (engagement_uuid, role);
 
 -- Tasking lookup
-CREATE INDEX IF NOT EXISTS tasking_perm_idx  ON tasking (task_permission);
-CREATE INDEX IF NOT EXISTS task_override_idx ON task_overrides (engagement_uuid, task_uuid);
+CREATE INDEX IF NOT EXISTS tasking_perm_idx    ON tasking (task_permission);
+CREATE INDEX IF NOT EXISTS task_override_idx   ON task_overrides (engagement_uuid, task_uuid);
 
 -- Agent / config
 CREATE INDEX IF NOT EXISTS agent_cfg_idx       ON agent_core (agent_configuration_uuid);
@@ -358,7 +363,7 @@ CREATE INDEX IF NOT EXISTS agent_uninstall_idx ON agent_core (uninstall_date);
 CREATE INDEX IF NOT EXISTS agent_cfg_buildconf_gin ON agent_configuration USING GIN (build_configuration jsonb_path_ops);
 
 -- Endpoints & inventories
-CREATE INDEX IF NOT EXISTS endpoints_agent_idx     ON endpoints (agent_uuid);
+CREATE INDEX IF NOT EXISTS endpoints_agent_idx      ON endpoints (agent_uuid);
 CREATE INDEX IF NOT EXISTS endpoints_engagement_idx ON endpoints (engagement_uuid);
 CREATE INDEX IF NOT EXISTS endpoints_ip_gin         ON endpoints USING GIN (ip);
 CREATE INDEX IF NOT EXISTS endpoints_gateway_gin    ON endpoints USING GIN (gateway);
@@ -366,6 +371,9 @@ CREATE INDEX IF NOT EXISTS endpoints_sysinfo_gin    ON endpoints USING GIN (syst
 CREATE INDEX IF NOT EXISTS endpoints_apps_gin       ON endpoints USING GIN (installed_applications jsonb_path_ops);
 CREATE INDEX IF NOT EXISTS endpoints_drivers_gin    ON endpoints USING GIN (drivers jsonb_path_ops);
 CREATE INDEX IF NOT EXISTS endpoints_patchhist_gin  ON endpoints USING GIN (patch_history jsonb_path_ops);
+
+-- Load balancers pagination/indexing
+CREATE INDEX IF NOT EXISTS load_balancers_created_idx ON load_balancers (created_at DESC);
 
 -- =================== Ops log & notification channel ==================
 -- Channel name used: 'partition_dump'
@@ -384,8 +392,7 @@ CREATE TABLE IF NOT EXISTS partition_archive_ops (
 );
 
 CREATE OR REPLACE FUNCTION partition_archive_ops_touch()
-RETURNS trigger LANGUAGE plpgsql AS $$
-BEGIN
+RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
   NEW.updated_at := now();
   RETURN NEW;
 END$$;
@@ -394,8 +401,6 @@ DROP TRIGGER IF EXISTS trg_partition_archive_ops_touch ON partition_archive_ops;
 CREATE TRIGGER trg_partition_archive_ops_touch
 BEFORE UPDATE ON partition_archive_ops
 FOR EACH ROW EXECUTE FUNCTION partition_archive_ops_touch();
-
-
 
 -- ================= Generalized rotation & archive function ===========
 -- Detach old HOT partition -> attach to ARCHIVE -> (optional) move tablespace
@@ -444,13 +449,11 @@ BEGIN
                      v_arch_parent, v_archive_child, v_start, v_end);
 
       -- Per-partition index for common queries
-      -- Try standard name; if schema differs, it's fine (IF NOT EXISTS)
       BEGIN
         EXECUTE format('CREATE INDEX IF NOT EXISTS %I_agent_time_idx ON %s (agent_uuid, created_at DESC)',
                        split_part(v_archive_child, '.', 2), v_archive_child);
       EXCEPTION WHEN OTHERS THEN
-        -- Not all tables have (agent_uuid, created_at); best-effort only
-        NULL;
+        NULL; -- not every table has both columns
       END;
 
       -- Optional: move to slower tablespace (and its index)
@@ -536,6 +539,12 @@ Policy Matrix (Hot / Warm / Cold):
   agent_core                    Dim    No          Forever    N/A        Optional dumps (no delete)
   users / engagements / tasking / agent_configuration / load_balancers (core dims):
                                  Dim   No          Forever    N/A        Optional dumps (no delete)
+
+Roles:
+  • Global role on users.global_role (Analyst < Operator < Admin).
+  • Per-engagement role on engagement_users.role.
+  • Effective role = GREATEST(users.global_role, engagement_users.role).
+  • View: vw_user_engagement_roles provides effective_role per engagement.
 
 Design tenets:
   • Facts use pg_partman (daily) as HOT parents; old partitions are DETACHED and
