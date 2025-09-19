@@ -12,80 +12,100 @@ authentication
   => https://github.com/panva/node-oidc-provider   
 =====================================================================
 Tables
-- Agent
+- agent
   - columns
-	- agent id
-        - build id
-	- type
-        - last seen
-- Agent Check Ins
+		- agent_uuid
+		- build_uuid
+		- type
+		- last_seen  (timestamp)
+		- created_at (timestamp)
+- agent_check_ins
   - columns
-	- agent id
-  	- timestamp
-- Agent Tasking History
+		- agent_uuid
+  	- created_at (timestamp)
+- agent_tasking_history
   - columns
-	- agent id
-	- operator uuid
-	- Tasking ID
-- Agent Configuration
+		- agent_uuid
+		- operator_uuid
+		- tasking_uuid
+		- created_at (timestamp)
+- agent_configuration
   - columns
-	- agent id
-	- build id
-        - build configuration
-- Tasking
+		- agent_uuid
+		- build_uuid
+    - build_configuration
+		- created_at (timestamp)
+- tasking
   - columns
-	- Task ID
-	- Task Long Name
-	- Task Permission
-- Users
+		- task_uuid
+		- task_long_name
+		- task_permission
+		- created_at (timestamp)
+- users
   - columns
-        - uuid
-	- username
-	- password
-	- account status (enabled/disabled)
-    	- roles (Watcher(Analyst), Operator, Admin)
-- Operators
+    - engagement_uuid
+		- username
+		- password
+		- account_status (enabled/disabled)
+		- roles (Analyst, Operator, Admin)
+		- created_at (timestamp)
+- operators
+  - columns
+		- engagement_uuid
+		- platform(win,lin,osx,net)
+		- allowed_tasks (list)
+		- created_at (timestamp)
+- analyst
+  - columns
+		- engagement_uuid
+		- allowed_tasks (List)
+		- created_at (timestamp)
+- admin
+  - columns
+	  - engagement_uuid
+	  - allowed_tasks
+		- created_at (timestamp)
+- last_login
    - columns
-	- uuid
-	- platform
-	- allowed tasks (list)
-- Analyst
-   - columns
-	- uuid
-	- allowed tasks (List)
-- Admin
-   - columns
-	- uuid
-	- allowed tasks
-- Last Login
-   - columns
-        - uuid
-	- timestamp
-- Engagements
-   - columns
-	- engagement_id
-	- engagement_name
-- Endpoints
-   - columns
-	- engagement_id
-	- os_version
-	- build_id
-	- ip
-	- system_info
-	- routing_table
-	- arp
-	- software_installed
-	- drivers
-	- patch_history
+    - engagement_uuid
+		- created_at (timestamp)
+- engagements
+  - columns
+		- engagement_uuid
+		- engagement_name
+		- start (timestamp)
+		- end (timestamp)
+		- created_at (timestamp)
+- endpoints
+  - columns
+		- engagement_uuid
+		- os_version
+		- build_id
+		- ip
+		- system_info
+		- routing_table
+		- arp
+		- installed_applications
+		- drivers
+		- patch_history
+		- dirwalk
+		- created_at (timestamp)
+- dirwalks
+	- columns
+		- engagement_uuid	
+		- files_mtime
+		- files_ctime
+		- files_atime
+		- created_at (timestamp)
 =====================================================================
 API
- /api/authenticate
- /api/task/agent/{task type}
- /api/agent/task/{agent_id}/
- /api/agent/task/{agent_id}/history
- /api/agent/task/{agent_id}/config
- /api/agent/task/{agent_id}/history
- /api/agent/build/{type}
- /api/admin/user/create
- /api/admin/user/delete
- /api/admin/user/disable
+	- /api/authenticate
+	- /api/task/agent/{task type}
+	- /api/agent/task/{agent_id}/
+	- /api/agent/task/{agent_id}/history
+	- /api/agent/task/{agent_id}/config
+	- /api/agent/task/{agent_id}/history
+	- /api/agent/build/{type}
+	- /api/admin/user/create
+	- /api/admin/user/delete
+	- /api/admin/user/disable
