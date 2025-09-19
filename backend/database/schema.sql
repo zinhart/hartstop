@@ -1,5 +1,5 @@
 -- =====================================================================
--- Antivirus Platform DB
+-- Hartstop C5 Platform DB
 -- Single-file install: core schema, partitioning (pg_partman),
 -- hot→warm→cold rotation, replay-ready archives, and operational helpers.
 -- =====================================================================
@@ -225,6 +225,18 @@ CREATE TABLE IF NOT EXISTS dirwalks_archive (
   payload         JSONB NOT NULL
 ) PARTITION BY RANGE (created_at);
 
+-- ================= API Idempotency ===========
+CREATE TABLE IF NOT EXISTS api_idempotency (
+  key TEXT PRIMARY KEY,
+  status SMALLINT NOT NULL, -- 1=processing, 2=done
+  response_etag TEXT,
+  response_body JSONB,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS api_idempotency_created_idx ON api_idempotency (created_at);
+
+
+
 -- ========================== pg_partman setup =========================
 -- Hot parents: daily interval, premake 7 days; RETENTION: detach only (keep_table=true)
 SELECT partman.create_parent(
@@ -382,6 +394,8 @@ DROP TRIGGER IF EXISTS trg_partition_archive_ops_touch ON partition_archive_ops;
 CREATE TRIGGER trg_partition_archive_ops_touch
 BEFORE UPDATE ON partition_archive_ops
 FOR EACH ROW EXECUTE FUNCTION partition_archive_ops_touch();
+
+
 
 -- ================= Generalized rotation & archive function ===========
 -- Detach old HOT partition -> attach to ARCHIVE -> (optional) move tablespace

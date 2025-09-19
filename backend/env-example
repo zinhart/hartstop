@@ -1,0 +1,8 @@
+NODE_ENV=production
+PORT=8080
+DATABASE_URL=postgres://api_user:*****@db-host:5432/avdb
+PGSSL=true
+OIDC_ISSUER=https://auth.example.com
+OIDC_AUDIENCE=api://antivirus
+IDEM_TTL_HOURS=24
+LOG_LEVEL=info
