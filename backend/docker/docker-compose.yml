@@ -1,0 +1,121 @@
+# docker/docker-compose.yml
+version: "3.9"
+
+services:
+  pg-primary:
+    image: postgres:16
+    container_name: pg-primary
+    env_file: [.env]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "${PRIMARY_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - pg_primary_data:/var/lib/postgresql/data
+      - ./primary/initdb.d:/docker-entrypoint-initdb.d:ro
+      # Optional: mount TLS certs if enabling native Postgres SSL later
+      # - ./certs/server.crt:/var/lib/postgresql/certs/server.crt:ro
+      # - ./certs/server.key:/var/lib/postgresql/certs/server.key:ro
+      # - ./certs/rootCA.crt:/var/lib/postgresql/certs/rootCA.crt:ro
+    networks: [avnet]
+
+  pg-replica-1:
+    image: postgres:16
+    container_name: pg-replica-1
+    depends_on:
+      pg-primary: { condition: service_healthy }
+    env_file: [.env]
+    environment:
+      REPL_USER: ${REPL_USER}
+      REPL_PASSWORD: ${REPL_PASSWORD}
+      PRIMARY_HOST: pg-primary
+      PRIMARY_PORT: "5432"
+      SLOT_NAME: replica1
+      PGDATA: /var/lib/postgresql/data
+      # healthcheck only:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_DB: ${POSTGRES_DB}
+    command: ["bash", "-lc", "/docker-entrypoint-initdb.d/clone-and-run.sh"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - pg_replica1_data:/var/lib/postgresql/data
+      - ./replica/clone-and-run.sh:/docker-entrypoint-initdb.d/clone-and-run.sh:ro
+    networks: [avnet]
+    ports:
+      - "${REPLICA1_PORT:-5433}:5432"
+
+  pg-replica-2:
+    image: postgres:16
+    container_name: pg-replica-2
+    depends_on:
+      pg-primary: { condition: service_healthy }
+    env_file: [.env]
+    environment:
+      REPL_USER: ${REPL_USER}
+      REPL_PASSWORD: ${REPL_PASSWORD}
+      PRIMARY_HOST: pg-primary
+      PRIMARY_PORT: "5432"
+      SLOT_NAME: replica2
+      PGDATA: /var/lib/postgresql/data
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_DB: ${POSTGRES_DB}
+    command: ["bash", "-lc", "/docker-entrypoint-initdb.d/clone-and-run.sh"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - pg_replica2_data:/var/lib/postgresql/data
+      - ./replica/clone-and-run.sh:/docker-entrypoint-initdb.d/clone-and-run.sh:ro
+    networks: [avnet]
+    ports:
+      - "${REPLICA2_PORT:-5434}:5432"
+
+  pg-replica-3:
+    image: postgres:16
+    container_name: pg-replica-3
+    depends_on:
+      pg-primary: { condition: service_healthy }
+    env_file: [.env]
+    environment:
+      REPL_USER: ${REPL_USER}
+      REPL_PASSWORD: ${REPL_PASSWORD}
+      PRIMARY_HOST: pg-primary
+      PRIMARY_PORT: "5432"
+      SLOT_NAME: replica3
+      PGDATA: /var/lib/postgresql/data
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_DB: ${POSTGRES_DB}
+    command: ["bash", "-lc", "/docker-entrypoint-initdb.d/clone-and-run.sh"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - pg_replica3_data:/var/lib/postgresql/data
+      - ./replica/clone-and-run.sh:/docker-entrypoint-initdb.d/clone-and-run.sh:ro
+    networks: [avnet]
+    ports:
+      - "${REPLICA3_PORT:-5435}:5432"
+
+volumes:
+  pg_primary_data:
+  pg_replica1_data:
+  pg_replica2_data:
+  pg_replica3_data:
+
+networks:
+  avnet:

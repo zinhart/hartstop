@@ -14,6 +14,7 @@ import healthRoutes from "./routes/health";
 
 // secured (OIDC bearer required)
 import adminUsers from "./routes/admin.users";
+import userMemberships from "./routes/admin.users.memberships";
 import engagements from "./routes/engagements";
 import agentConfigs from "./routes/agentConfigs";
 import loadBalancers from "./routes/loadBalancers";
@@ -45,6 +46,7 @@ app.use(verifyBearer);
 
 // --- Domain routes (secured) ---
 app.use(adminUsers);     // /api/v1/admin/users...
+
 app.use(engagements);    // /api/v1/engagements...
 app.use(agentConfigs);   // /api/v1/agent-configs...
 app.use(loadBalancers);  // /api/v1/load-balancers...
