@@ -182,9 +182,12 @@ CREATE TABLE IF NOT EXISTS endpoints (
   gateway                INET[] NOT NULL DEFAULT '{}',
   routing_table          JSONB,
   arp                    JSONB,
+  procesess              JSONB, -- Want this to be a separate table consisting of image, path, commandline, name, permissions etc
+  services               JSONB, -- Want this to be a separate table consiting of commandline binary permissions etc
   installed_applications JSONB,
   drivers                JSONB,
   patch_history          JSONB,
+  open_services_port     JSONB,
   created_at             TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
